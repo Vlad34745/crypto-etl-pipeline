@@ -24,5 +24,5 @@ Follow these quick steps to deploy and run the automation pipeline locally:
 
 ### 1. Clone the Repository
 ```bash
-git clone [https://github.com/YOUR_USERNAME/crypto-etl-pipeline.git](https://github.com/Vlad34745/crypto-etl-pipeline.git)
+git clone [https://github.com/Vlad34745/crypto-etl-pipeline.git](https://github.com/Vlad34745/crypto-etl-pipeline.git)
 cd crypto-etl-pipeline
