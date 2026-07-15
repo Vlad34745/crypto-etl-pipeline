@@ -5,14 +5,14 @@ echo [STARTING] Launching Crypto Telemetry Pipeline...
 echo ===================================================
 echo.
 
-:: 1. Активація віртуального середовища venv
+:: 1. Activating the venv virtual environment
 if exist venv\Scripts\activate.bat (
     call venv\Scripts\activate.bat
 ) else if exist .venv\Scripts\activate.bat (
     call .venv\Scripts\activate.bat
 )
 
-:: 2. Запуск скрипту всередині правильного середовища
+:: 2. Running the script within the correct environment
 python crypto_automation.py
 
 echo.
