@@ -4,10 +4,14 @@ venv/
 
 # Скомпільований код
 __pycache__/
+.pytest_cache/
 
 # Локальні файли даних (не треба заливати на Гітхаб)
 *.xlsx
 *.csv
+
+# Логи
+pipeline.log
 
 # Налаштування VS Code
 .vscode/
