@@ -94,7 +94,7 @@ variables or a `.env` file (see `.env.example`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `COIN_IDS` | `bitcoin,ethereum,solana,near,the-open-network` | Comma-separated CoinGecko coin IDs to track |
+| `COIN_IDS` | `bitcoin` | Comma-separated CoinGecko coin IDs to track — see `.env.example` for a ready list of common coins to copy-paste |
 | `API_URL` | CoinGecko markets endpoint | Data source URL |
 | `RETRIES` | `3` | API retry attempts |
 | `RETRY_DELAY_SECONDS` | `15` | Delay between retries |

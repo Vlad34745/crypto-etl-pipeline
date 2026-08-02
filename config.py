@@ -26,7 +26,10 @@ def _int_env(name: str, default: int) -> int:
 
 
 # --- Data source -----------------------------------------------------------
-COIN_IDS = os.getenv("COIN_IDS", "bitcoin,ethereum,solana,near,the-open-network")
+# --- Data source -----------------------------------------------------------
+# Comma-separated CoinGecko coin IDs (not tickers) — e.g. "bitcoin,ethereum".
+# See .env.example for a ready-to-copy list of common coin IDs.
+COIN_IDS = os.getenv("COIN_IDS", "bitcoin")
 API_URL = os.getenv("API_URL", "https://api.coingecko.com/api/v3/coins/markets")
 
 # --- Retry behaviour ---------------------------------------------------------

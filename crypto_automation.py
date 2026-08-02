@@ -164,6 +164,9 @@ def load_and_merge_history(output_file: str, df_new: pd.DataFrame) -> pd.DataFra
         logger.info("No existing tracking file found. Initializing new dataset.")
         df_updated = df_new.copy()
 
+    df_updated.sort_values(by=["name", "snapshot_time"], inplace=True)
+    df_updated.reset_index(drop=True, inplace=True)
+
     logger.info("Sync complete. Total rows: %s", len(df_updated))
     return df_updated
 
