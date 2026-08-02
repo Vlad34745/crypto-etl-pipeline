@@ -41,6 +41,35 @@ def setup_logging() -> None:
     )
 
 
+def resolve_coin_ids(user_input: str) -> str:
+    """Turn free-typed tickers/ids ("btc eth sol" or "btc,eth,sol") into a
+    CoinGecko-ready comma-separated id string ("bitcoin,ethereum,solana").
+
+    Tokens found in config.TICKER_TO_COIN_ID are translated; anything else
+    is assumed to already be a valid CoinGecko id and passed through
+    lowercased, as-is.
+    """
+    tokens = [t.strip() for t in user_input.replace(",", " ").split() if t.strip()]
+    resolved = []
+    for token in tokens:
+        coin_id = config.TICKER_TO_COIN_ID.get(token.upper(), token.lower())
+        resolved.append(coin_id)
+    return ",".join(resolved)
+
+
+def prompt_for_coins(default_coin_ids: str) -> str:
+    """Interactively ask which coins to track; Enter keeps the current default."""
+    answer = input(
+        f"Які монети відстежувати? (тікери через пробіл, напр. \"btc eth sol\"; "
+        f"Enter — залишити поточні [{default_coin_ids}]): "
+    ).strip()
+    if not answer:
+        return default_coin_ids
+    resolved = resolve_coin_ids(answer)
+    print(f"-> Обрано: {resolved}")
+    return resolved
+
+
 # =============================================================================
 # STEP 1: Automated Data Ingestion & API Integration
 # =============================================================================
@@ -366,12 +395,35 @@ def build_excel_report(df_updated: pd.DataFrame, output_file: str) -> None:
     logger.info("Excel report saved: '%s'", output_file)
 
 
+def is_snapshot_too_soon(output_file: str, min_interval_minutes: int) -> bool:
+    """True if the last saved snapshot is more recent than the configured interval."""
+    if min_interval_minutes <= 0 or not os.path.exists(output_file):
+        return False
+
+    df_historical = pd.read_excel(output_file, sheet_name="Crypto Market Timeline")
+    if df_historical.empty:
+        return False
+
+    last_time = pd.to_datetime(df_historical["snapshot_time"]).max()
+    elapsed_minutes = (datetime.datetime.now() - last_time).total_seconds() / 60
+    if elapsed_minutes < min_interval_minutes:
+        logger.info(
+            "Skipping: last snapshot was %.1f min ago, below MIN_SNAPSHOT_INTERVAL_MINUTES=%s.",
+            elapsed_minutes, min_interval_minutes,
+        )
+        return True
+    return False
+
+
 # =============================================================================
 # Orchestration
 # =============================================================================
 def main() -> int:
     setup_logging()
     logger.info("=== Crypto ETL Pipeline starting ===")
+
+    if is_snapshot_too_soon(config.OUTPUT_FILE, config.MIN_SNAPSHOT_INTERVAL_MINUTES):
+        return 0
 
     raw_json = fetch_crypto_data_with_retry()
     if not raw_json:
@@ -395,4 +447,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if sys.stdin.isatty() and "--no-prompt" not in sys.argv:
+        config.COIN_IDS = prompt_for_coins(config.COIN_IDS)
     sys.exit(main())

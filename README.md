@@ -69,8 +69,19 @@ cp .env.example .env
 ```bash
 python crypto_automation.py
 ```
+When run in an interactive terminal, it first asks which coins to track:
+```
+Які монети відстежувати? (тікери через пробіл, напр. "btc eth sol"; Enter — залишити поточні [bitcoin]):
+```
+Type tickers separated by spaces (e.g. `btc eth sol`) and press Enter, or
+just press Enter to keep whatever is set in `COIN_IDS`. This prompt is
+automatically skipped in non-interactive environments (CI, cron, scheduled
+`.bat` runs with no console attached) — those always use `COIN_IDS` from
+`.env`/the environment.
+
 Or, on Windows, double-click `run_pipeline.bat` — it activates the
-virtual environment automatically and runs the pipeline for you.
+virtual environment automatically and runs the pipeline for you (with the
+same coin prompt, since it opens a normal console window).
 
 ### 6. Run the tests
 ```bash
@@ -101,6 +112,7 @@ variables or a `.env` file (see `.env.example`):
 | `OUTPUT_FILE` | `crypto_history.xlsx` | Workbook path |
 | `BACKUP_DIR` | `backups` | Backup folder |
 | `MAX_BACKUPS` | `10` | Number of backups to retain |
+| `MIN_SNAPSHOT_INTERVAL_MINUTES` | `0` | Skip writing if the last snapshot is more recent than this (0 = always write) |
 | `LOG_FILE` | `pipeline.log` | Log file path |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 

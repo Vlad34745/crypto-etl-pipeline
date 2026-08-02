@@ -154,3 +154,57 @@ def test_backup_retention_keeps_only_max_backups(tmp_path):
     remaining = [f for f in os.listdir(backup_dir) if f.startswith("crypto_history_backup_")]
     # 12 existing + 1 new = 13, retention keeps the most recent 10
     assert len(remaining) == 10
+
+
+# --- is_snapshot_too_soon: throttling -----------------------------------------
+def test_throttle_disabled_when_interval_is_zero(tmp_path):
+    output_file = tmp_path / "history.xlsx"
+    df = pipeline.clean_raw_data(SAMPLE_RAW_JSON)
+    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Crypto Market Timeline", index=False)
+
+    assert pipeline.is_snapshot_too_soon(str(output_file), min_interval_minutes=0) is False
+
+
+def test_throttle_skips_when_last_snapshot_is_recent(tmp_path):
+    output_file = tmp_path / "history.xlsx"
+    df = pipeline.clean_raw_data(SAMPLE_RAW_JSON)
+    df["snapshot_time"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Crypto Market Timeline", index=False)
+
+    assert pipeline.is_snapshot_too_soon(str(output_file), min_interval_minutes=60) is True
+
+
+def test_throttle_allows_when_last_snapshot_is_old(tmp_path):
+    output_file = tmp_path / "history.xlsx"
+    df = pipeline.clean_raw_data(SAMPLE_RAW_JSON)
+    old_time = pd.Timestamp.now() - pd.Timedelta(hours=2)
+    df["snapshot_time"] = old_time.strftime("%Y-%m-%d %H:%M:%S")
+    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Crypto Market Timeline", index=False)
+
+    assert pipeline.is_snapshot_too_soon(str(output_file), min_interval_minutes=60) is False
+
+
+def test_throttle_false_when_no_file_exists(tmp_path):
+    output_file = tmp_path / "does_not_exist.xlsx"
+    assert pipeline.is_snapshot_too_soon(str(output_file), min_interval_minutes=60) is False
+
+
+# --- resolve_coin_ids: interactive ticker input --------------------------------
+def test_resolve_coin_ids_from_space_separated_tickers():
+    assert pipeline.resolve_coin_ids("btc eth sol") == "bitcoin,ethereum,solana"
+
+
+def test_resolve_coin_ids_is_case_insensitive():
+    assert pipeline.resolve_coin_ids("BTC Eth") == "bitcoin,ethereum"
+
+
+def test_resolve_coin_ids_accepts_commas_too():
+    assert pipeline.resolve_coin_ids("btc, eth, sol") == "bitcoin,ethereum,solana"
+
+
+def test_resolve_coin_ids_passes_through_unknown_tokens_as_ids():
+    # Not in TICKER_TO_COIN_ID -> assumed to already be a valid CoinGecko id
+    assert pipeline.resolve_coin_ids("btc dogwifhat") == "bitcoin,dogwifhat"
