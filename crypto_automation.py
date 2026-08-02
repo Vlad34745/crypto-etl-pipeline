@@ -19,8 +19,10 @@ import time
 import openpyxl
 import pandas as pd
 import requests
+from openpyxl.chart import LineChart, Reference
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 import config
 
@@ -274,6 +276,45 @@ def build_excel_report(df_updated: pd.DataFrame, output_file: str) -> None:
                 cell.number_format = "0.00%"
                 cell.alignment = align_right
                 cell.font = font_positive if val > 0 else font_negative
+
+    # --- Price Trend Chart ---
+    # Pivot the timeline into wide form (one column per coin) on a hidden
+    # helper sheet, then plot it as a line chart embedded on the Dashboard.
+    ws_dash["A14"] = "Price Trend (All Snapshots)"
+    ws_dash["A14"].font = font_section
+
+    if "ChartData" in wb.sheetnames:
+        del wb["ChartData"]
+    ws_chart_data = wb.create_sheet("ChartData")
+    ws_chart_data.sheet_state = "hidden"
+
+    df_pivot = (
+        df_updated
+        .pivot_table(index="snapshot_time", columns="symbol", values="current_price", aggfunc="last")
+        .sort_index()
+        .reset_index()
+    )
+
+    for r in dataframe_to_rows(df_pivot, index=False, header=True):
+        ws_chart_data.append(r)
+
+    if len(df_pivot) >= 1 and len(df_pivot.columns) >= 2:
+        chart = LineChart()
+        chart.title = "Price Trend by Coin"
+        chart.y_axis.title = "Price (USD)"
+        chart.x_axis.title = "Snapshot"
+        chart.height = 9
+        chart.width = 20
+
+        max_row = ws_chart_data.max_row
+        max_col = ws_chart_data.max_column
+
+        data = Reference(ws_chart_data, min_col=2, max_col=max_col, min_row=1, max_row=max_row)
+        categories = Reference(ws_chart_data, min_col=1, min_row=2, max_row=max_row)
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(categories)
+
+        ws_dash.add_chart(chart, "A15")
 
     # --- Timeline sheet formatting ---
     ws_timeline.row_dimensions[1].height = 26

@@ -1,8 +1,13 @@
 # Automated Crypto ETL Pipeline & Business Intelligence Dashboard
 
+[![Crypto ETL Pipeline](https://github.com/Vlad34745/crypto-etl-pipeline/actions/workflows/pipeline.yml/badge.svg)](https://github.com/Vlad34745/crypto-etl-pipeline/actions/workflows/pipeline.yml)
+
 An automated data pipeline (ETL) that extracts real-time cryptocurrency
 market data via a REST API, maintains an incremental historical dataset,
 and compiles a styled executive-ready dashboard inside Microsoft Excel.
+
+![Dashboard preview](docs/dashboard-preview.png)
+*Sample output — KPI summary, top gainer/loser table, and price trend chart, generated automatically by the pipeline.*
 
 ## 🚀 Key Features
 * **Data Ingestion:** Connects to the CoinGecko Public API with built-in retry / rate-limit (429) handling.
