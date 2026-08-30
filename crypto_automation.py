@@ -1,9 +1,9 @@
 """
 Crypto ETL Pipeline & Business Intelligence Dashboard.
 
-Fetches live market data from the CoinGecko API, appends it to a
-historical Excel log (with automatic timestamped backups), and
-rebuilds a styled "Executive Dashboard" summary sheet.
+Fetches live market data from the CoinGecko API, stores it in a SQLite
+database (the source of truth, with automatic timestamped backups), and
+regenerates a styled "Executive Dashboard" Excel report from it on every run.
 
 Run directly:
     python crypto_automation.py
@@ -25,6 +25,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 import config
+import db
 
 logger = logging.getLogger("crypto_etl")
 
@@ -157,22 +158,23 @@ def validate_data(df: pd.DataFrame, expected_coin_count: int = None) -> None:
 # =============================================================================
 # STEP 2: Incremental Data Accumulation & History Tracking
 # =============================================================================
-def backup_existing_file(output_file: str, backup_dir: str, max_backups: int) -> None:
-    """Snapshot the current workbook before overwriting it, then prune old backups."""
-    if not os.path.exists(output_file):
+def backup_existing_file(source_file: str, backup_dir: str, max_backups: int) -> None:
+    """Snapshot the given file before it's modified, then prune old backups."""
+    if not os.path.exists(source_file):
         return
 
     if not os.path.exists(backup_dir):
         os.makedirs(backup_dir)
 
+    ext = os.path.splitext(source_file)[1]
     timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_filename = os.path.join(backup_dir, f"crypto_history_backup_{timestamp_str}.xlsx")
-    shutil.copyfile(output_file, backup_filename)
+    backup_filename = os.path.join(backup_dir, f"crypto_history_backup_{timestamp_str}{ext}")
+    shutil.copyfile(source_file, backup_filename)
     logger.info("Backup saved to '%s'", backup_filename)
 
     existing_backups = sorted(
         f for f in os.listdir(backup_dir)
-        if f.startswith("crypto_history_backup_") and f.endswith(".xlsx")
+        if f.startswith("crypto_history_backup_") and f.endswith(ext)
     )
     backups_to_delete = existing_backups[:-max_backups] if len(existing_backups) > max_backups else []
     for old_backup in backups_to_delete:
@@ -182,20 +184,15 @@ def backup_existing_file(output_file: str, backup_dir: str, max_backups: int) ->
                      len(backups_to_delete), max_backups)
 
 
-def load_and_merge_history(output_file: str, df_new: pd.DataFrame) -> pd.DataFrame:
-    """Merge the new snapshot into the historical timeline, deduplicated."""
-    if os.path.exists(output_file):
-        logger.info("Loading historical timeline from '%s'...", output_file)
-        df_historical = pd.read_excel(output_file, sheet_name="Crypto Market Timeline")
-        df_updated = pd.concat([df_historical, df_new], ignore_index=True)
-        df_updated.drop_duplicates(subset=["symbol", "snapshot_time"], keep="first", inplace=True)
-    else:
-        logger.info("No existing tracking file found. Initializing new dataset.")
-        df_updated = df_new.copy()
+def load_and_merge_history(df_new: pd.DataFrame) -> pd.DataFrame:
+    """Insert the new snapshot into SQLite (the source of truth) and return
+    the full, deduplicated, sorted historical dataset.
+    """
+    inserted = db.insert_snapshot(df_new)
+    logger.info("Inserted %s new row(s) into the database (%s duplicate(s) skipped).",
+                inserted, len(df_new) - inserted)
 
-    df_updated.sort_values(by=["name", "snapshot_time"], inplace=True)
-    df_updated.reset_index(drop=True, inplace=True)
-
+    df_updated = db.load_history()
     logger.info("Sync complete. Total rows: %s", len(df_updated))
     return df_updated
 
@@ -395,12 +392,12 @@ def build_excel_report(df_updated: pd.DataFrame, output_file: str) -> None:
     logger.info("Excel report saved: '%s'", output_file)
 
 
-def is_snapshot_too_soon(output_file: str, min_interval_minutes: int) -> bool:
+def is_snapshot_too_soon(min_interval_minutes: int) -> bool:
     """True if the last saved snapshot is more recent than the configured interval."""
-    if min_interval_minutes <= 0 or not os.path.exists(output_file):
+    if min_interval_minutes <= 0 or not os.path.exists(config.DB_FILE):
         return False
 
-    df_historical = pd.read_excel(output_file, sheet_name="Crypto Market Timeline")
+    df_historical = db.load_history()
     if df_historical.empty:
         return False
 
@@ -415,6 +412,40 @@ def is_snapshot_too_soon(output_file: str, min_interval_minutes: int) -> bool:
     return False
 
 
+def send_telegram_alert(message: str) -> None:
+    """Best-effort send — never raises, a failed alert shouldn't fail the pipeline."""
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        resp = requests.post(url, data={"chat_id": config.TELEGRAM_CHAT_ID, "text": message}, timeout=10)
+        if resp.status_code == 200:
+            logger.info("Telegram alert sent: %s", message.splitlines()[0])
+        else:
+            logger.warning("Telegram alert failed (status %s): %s", resp.status_code, resp.text)
+    except requests.exceptions.RequestException as e:
+        logger.warning("Telegram alert failed: %s", e)
+
+
+def check_price_alerts(df_updated: pd.DataFrame) -> None:
+    """Send a Telegram alert for each coin whose latest 24h change crosses
+    ALERT_THRESHOLD_PERCENT. No-op unless both Telegram settings are configured.
+    """
+    if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
+        return
+
+    latest_time = df_updated["snapshot_time"].max()
+    df_latest = df_updated[df_updated["snapshot_time"] == latest_time]
+
+    for _, row in df_latest.iterrows():
+        change_percent = row["price_change_percentage_24h"] * 100
+        if abs(change_percent) >= config.ALERT_THRESHOLD_PERCENT:
+            direction = "\U0001F680" if change_percent > 0 else "\U0001F53B"
+            message = (
+                f"{direction} {row['name']} ({row['symbol']}): {change_percent:+.2f}% за 24h\n"
+                f"Ціна: ${row['current_price']:,.2f}"
+            )
+            send_telegram_alert(message)
+
+
 # =============================================================================
 # Orchestration
 # =============================================================================
@@ -422,7 +453,7 @@ def main() -> int:
     setup_logging()
     logger.info("=== Crypto ETL Pipeline starting ===")
 
-    if is_snapshot_too_soon(config.OUTPUT_FILE, config.MIN_SNAPSHOT_INTERVAL_MINUTES):
+    if is_snapshot_too_soon(config.MIN_SNAPSHOT_INTERVAL_MINUTES):
         return 0
 
     raw_json = fetch_crypto_data_with_retry()
@@ -438,9 +469,10 @@ def main() -> int:
         logger.error("Data validation failed: %s", e)
         return 1
 
-    backup_existing_file(config.OUTPUT_FILE, config.BACKUP_DIR, config.MAX_BACKUPS)
-    df_updated = load_and_merge_history(config.OUTPUT_FILE, df_clean)
+    backup_existing_file(config.DB_FILE, config.BACKUP_DIR, config.MAX_BACKUPS)
+    df_updated = load_and_merge_history(df_clean)
     build_excel_report(df_updated, config.OUTPUT_FILE)
+    check_price_alerts(df_updated)
 
     logger.info("=== Pipeline completed successfully ===")
     return 0

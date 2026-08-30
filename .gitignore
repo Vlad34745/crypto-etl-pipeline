@@ -9,6 +9,12 @@ __pycache__/
 # Локальні файли даних (не треба заливати на Гітхаб)
 *.xlsx
 *.csv
+*.db
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
 
 # Логи
 pipeline.log

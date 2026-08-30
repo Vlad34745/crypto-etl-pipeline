@@ -18,6 +18,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: Install ruff
         run: pip install ruff
       - name: Run ruff
@@ -31,12 +35,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-      - name: Run tests
-        run: pytest -v
+      - name: Run tests with coverage
+        run: pytest -v --cov=. --cov-report=term-missing --cov-fail-under=70
 
   run-pipeline:
     needs: test
@@ -47,15 +55,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run pipeline
-        run: python crypto_automation.py
-      - name: Upload updated workbook as artifact
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python crypto_automation.py --no-prompt
+      - name: Upload updated database + workbook as artifact
         uses: actions/upload-artifact@v4
         with:
           name: crypto-history-${{ github.run_id }}
           path: |
+            crypto_history.db
             crypto_history.xlsx
             pipeline.log
           retention-days: 30

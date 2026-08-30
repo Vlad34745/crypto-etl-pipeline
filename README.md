@@ -1,32 +1,40 @@
 # Automated Crypto ETL Pipeline & Business Intelligence Dashboard
 
 [![Crypto ETL Pipeline](https://github.com/Vlad34745/crypto-etl-pipeline/actions/workflows/pipeline.yml/badge.svg)](https://github.com/Vlad34745/crypto-etl-pipeline/actions/workflows/pipeline.yml)
+![Coverage >= 70%](https://img.shields.io/badge/coverage-%E2%89%A570%25%20enforced%20in%20CI-brightgreen)
 
 An automated data pipeline (ETL) that extracts real-time cryptocurrency
-market data via a REST API, maintains an incremental historical dataset,
-and compiles a styled executive-ready dashboard inside Microsoft Excel.
+market data via a REST API, stores it in SQLite, and compiles a styled
+executive-ready dashboard inside Microsoft Excel — with optional Telegram
+price alerts.
 
 ![Dashboard preview](docs/dashboard-preview.png)
 *Sample output — KPI summary, top gainer/loser table, and price trend chart, generated automatically by the pipeline.*
 
 ## 🚀 Key Features
 * **Data Ingestion:** Connects to the CoinGecko Public API with built-in retry / rate-limit (429) handling.
-* **Data Validation:** Sanity-checks every fetched snapshot (required columns, non-empty, no null prices) before it's allowed to touch the historical file.
-* **Incremental Storage:** Appends new snapshots to a historical Excel log, safely deduplicated by `(symbol, snapshot_time)`.
-* **Automated Backups with Retention:** Every run backs up the existing workbook to `backups/` before writing, and automatically prunes old backups (keeps the most recent `MAX_BACKUPS`, default 10).
-* **Dashboard:** A styled "Emerald Light" executive sheet with KPI summary blocks and a Top Gainers / Top Losers table.
+* **Data Validation:** Sanity-checks every fetched snapshot (required columns, non-empty, no null prices) before it's allowed to touch storage.
+* **SQLite Storage:** `crypto_history.db` is the source of truth — incremental inserts, a real uniqueness constraint on `(symbol, snapshot_time)`, no full-file rewrites as history grows.
+* **Excel Reporting:** `crypto_history.xlsx` is regenerated from the database on every run — a report artifact, not storage. Sorted by coin name, then time.
+* **Automated Backups with Retention:** Every run backs up the database to `backups/` before writing, and automatically prunes old backups (keeps the most recent `MAX_BACKUPS`, default 10).
+* **Dashboard:** A styled "Emerald Light" executive sheet with KPI blocks, a Top Gainers/Losers table, and an embedded price-trend line chart.
+* **Interactive Coin Selection:** Run it in a terminal and it asks which coins to track (`btc eth sol`) — no need to look up CoinGecko IDs. Skipped automatically in CI/cron.
+* **Snapshot Throttling:** Optional minimum interval between snapshots, so you can run the pipeline often without flooding the history.
+* **Telegram Alerts (optional):** Sends a message when a coin's 24h change crosses a configurable threshold.
 * **Structured Logging:** All pipeline activity is logged to both the console and `pipeline.log`.
-* **Configurable:** Coin list, retry behavior, storage paths, and logging are all controlled via environment variables / `.env` — no code changes needed.
-* **Tested:** Core logic (fetch/retry, cleaning, validation, merge/dedup, backup retention) is covered by `pytest` unit tests with the API mocked — no network access needed to run them.
-* **CI:** GitHub Actions runs the test suite on every push/PR, and can run the pipeline itself on a schedule.
+* **Configurable:** Coins, retry behavior, storage paths, throttling, alerts, and logging are all controlled via environment variables / `.env` — no code changes needed.
+* **Tested:** 29 `pytest` unit/integration tests (API and Telegram mocked, no network needed), enforcing ≥70% coverage in CI.
+* **CI:** GitHub Actions lints (`ruff`), tests (with coverage), and can run the pipeline itself on a schedule. Dependabot keeps dependencies and Actions up to date.
 
 ## 🛠️ Tech Stack
 * **Language:** Python
-* **Data Engineering:** Pandas
+* **Data Engineering:** Pandas, SQLite
 * **BI & Spreadsheet Engineering:** OpenPyXL
 * **Config:** python-dotenv
-* **Testing:** pytest
-* **CI/CD:** GitHub Actions
+* **Testing:** pytest, pytest-cov
+* **Linting:** ruff
+* **CI/CD:** GitHub Actions, Dependabot
+* **Alerts:** Telegram Bot API
 * **Automation (optional local use):** Windows Batch Scripting (`.bat`)
 
 ---
@@ -59,8 +67,8 @@ pip install -r requirements-dev.txt
 
 ### 4. (Optional) Configure
 Copy `.env.example` to `.env` and edit any values you want to override
-(tracked coins, retry settings, output paths, log level). If you skip
-this step, sensible defaults are used automatically.
+(tracked coins, retry settings, storage paths, throttling, Telegram alerts,
+log level). If you skip this step, sensible defaults are used automatically.
 ```bash
 cp .env.example .env
 ```
@@ -75,29 +83,41 @@ When run in an interactive terminal, it first asks which coins to track:
 ```
 Type tickers separated by spaces (e.g. `btc eth sol`) and press Enter, or
 just press Enter to keep whatever is set in `COIN_IDS`. This prompt is
-automatically skipped in non-interactive environments (CI, cron, scheduled
-`.bat` runs with no console attached) — those always use `COIN_IDS` from
-`.env`/the environment.
+automatically skipped in non-interactive environments (CI, cron) — those
+always use `COIN_IDS` from `.env`/the environment. You can also force this
+explicitly with `python crypto_automation.py --no-prompt`.
 
-Or, on Windows, double-click `run_pipeline.bat` — it activates the
-virtual environment automatically and runs the pipeline for you (with the
-same coin prompt, since it opens a normal console window).
+Or, on Windows, double-click `run_pipeline.bat` — it activates the virtual
+environment automatically and runs the pipeline for you (with the same coin
+prompt, since it opens a normal console window).
 
 ### 6. Run the tests
 ```bash
-pytest -v
+pytest -v --cov=. --cov-report=term-missing
 ```
-All tests mock the CoinGecko API, so no network access or API key is required.
+All tests mock the CoinGecko API and Telegram, so no network access or API
+keys are required.
 
 ### 7. Output
-A workbook named `crypto_history.xlsx` is generated (or updated) in the
-project root, containing:
-- **Dashboard** — KPI summary and the latest Top Gainer / Top Loser snapshot
-- **Crypto Market Timeline** — the full historical log of every snapshot ever collected
+- **`crypto_history.db`** (SQLite) — the source of truth for all historical snapshots.
+- **`crypto_history.xlsx`** — regenerated from the database every run:
+  - **Dashboard** — KPI summary, Top Gainer/Loser table, price trend chart
+  - **Crypto Market Timeline** — the full historical log, sorted by coin then time
 
-Each run also saves a timestamped backup to `backups/` before writing new
-data, keeping only the most recent `MAX_BACKUPS` copies. Activity is logged
-to `pipeline.log`.
+Each run also saves a timestamped backup of the database to `backups/`
+before writing new data, keeping only the most recent `MAX_BACKUPS` copies.
+Activity is logged to `pipeline.log`.
+
+## 📲 Telegram Alerts (optional)
+To get a message when a coin's 24h change crosses a threshold:
+1. Message [@BotFather](https://t.me/BotFather) on Telegram, create a bot, and copy its token.
+2. Send your new bot any message, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser to find your `chat.id`.
+3. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` (and `ALERT_THRESHOLD_PERCENT` if you want something other than the 5% default).
+
+Leaving either value blank disables alerts entirely — the pipeline runs
+exactly as before. For scheduled runs via GitHub Actions, set these as
+repository secrets (`Settings → Secrets and variables → Actions`) instead
+of committing them; the workflow already passes them through.
 
 ## ⚙️ Configuration
 All settings live in `config.py` and can be overridden via environment
@@ -109,31 +129,41 @@ variables or a `.env` file (see `.env.example`):
 | `API_URL` | CoinGecko markets endpoint | Data source URL |
 | `RETRIES` | `3` | API retry attempts |
 | `RETRY_DELAY_SECONDS` | `15` | Delay between retries |
-| `OUTPUT_FILE` | `crypto_history.xlsx` | Workbook path |
+| `DB_FILE` | `crypto_history.db` | SQLite database path (source of truth) |
+| `OUTPUT_FILE` | `crypto_history.xlsx` | Excel report path (regenerated every run) |
 | `BACKUP_DIR` | `backups` | Backup folder |
 | `MAX_BACKUPS` | `10` | Number of backups to retain |
 | `MIN_SNAPSHOT_INTERVAL_MINUTES` | `0` | Skip writing if the last snapshot is more recent than this (0 = always write) |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(blank)* | Enable Telegram alerts by setting both |
+| `ALERT_THRESHOLD_PERCENT` | `5.0` | 24h change (absolute %) that triggers an alert |
 | `LOG_FILE` | `pipeline.log` | Log file path |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 
 ## 🗂️ Project Structure
 ```
 crypto_automation.py    # Main pipeline (production script)
+db.py                    # SQLite persistence layer (source of truth)
 crypto_pipeline.ipynb   # Exploratory / development notebook (mirrors the script for interactive use)
 config.py                # Central configuration (env-driven)
-tests/                    # pytest unit tests (API mocked, no network needed)
-.github/workflows/        # CI: tests on push/PR, scheduled pipeline runs
+tests/                    # pytest unit/integration tests (API + Telegram mocked)
+.github/workflows/        # CI: lint, test+coverage, scheduled pipeline runs
+.github/dependabot.yml    # Weekly dependency + GitHub Actions update PRs
 .env.example              # Template for local configuration
 requirements.txt          # Runtime dependencies
-requirements-dev.txt       # + testing dependencies
+requirements-dev.txt       # + testing/linting dependencies
 ```
 
 ## 🤖 Continuous Integration
-`.github/workflows/pipeline.yml` does two things:
-1. **On every push/PR:** installs dependencies and runs `pytest`.
-2. **On a schedule (every 6 hours) or manual trigger:** runs the pipeline
-   and uploads the resulting `crypto_history.xlsx` as a downloadable
-   workflow artifact (kept for 30 days). The workbook is *not* committed
-   back to the repository — generated data files stay out of git history,
-   consistent with `.gitignore`. For persistent scheduled history, point
-   `OUTPUT_FILE` at cloud storage or a database instead of a local path.
+`.github/workflows/pipeline.yml`:
+1. **`lint`** — runs `ruff check .` on every push/PR.
+2. **`test`** — installs dependencies (pip-cached) and runs the full test suite with coverage, failing the build if coverage drops below 70%.
+3. **`run-pipeline`** — on a schedule (every 6 hours) or manual trigger, runs the pipeline (Telegram secrets passed through if configured) and uploads the resulting database + workbook as a downloadable artifact (kept for 30 days). Neither is committed back to the repository — generated data files stay out of git history, consistent with `.gitignore`.
+
+**Note on the coverage badge:** the ≥70% figure reflects a threshold enforced
+in CI (the build fails below it), not a live per-commit percentage. For a
+dynamic percentage badge, connect the repo to [Codecov](https://about.codecov.io/)
+(free for public repos) and upload the `coverage.xml` that `pytest-cov`
+already generates.
+
+Dependabot (`.github/dependabot.yml`) opens a PR weekly for outdated pip
+packages and GitHub Actions versions.

@@ -25,6 +25,13 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 # --- Data source -----------------------------------------------------------
 # Comma-separated CoinGecko coin IDs (not tickers) — e.g. "bitcoin,ethereum".
 # See .env.example for a ready-to-copy list of common coin IDs, or use the
@@ -59,6 +66,9 @@ RETRIES = _int_env("RETRIES", 3)
 RETRY_DELAY_SECONDS = _int_env("RETRY_DELAY_SECONDS", 15)
 
 # --- Storage -----------------------------------------------------------------
+# DB_FILE is the source of truth for historical data. OUTPUT_FILE (the Excel
+# workbook) is regenerated from it on every run — it's a report, not storage.
+DB_FILE = os.getenv("DB_FILE", "crypto_history.db")
 OUTPUT_FILE = os.getenv("OUTPUT_FILE", "crypto_history.xlsx")
 BACKUP_DIR = os.getenv("BACKUP_DIR", "backups")
 MAX_BACKUPS = _int_env("MAX_BACKUPS", 10)
@@ -66,6 +76,13 @@ MAX_BACKUPS = _int_env("MAX_BACKUPS", 10)
 # Skip writing a new snapshot if the last one is more recent than this
 # many minutes ago (0 = always write, no throttling)
 MIN_SNAPSHOT_INTERVAL_MINUTES = _int_env("MIN_SNAPSHOT_INTERVAL_MINUTES", 0)
+
+# --- Alerts (optional) --------------------------------------------------------
+# Sends a Telegram message when a coin's 24h change crosses this threshold.
+# Disabled unless both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set.
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+ALERT_THRESHOLD_PERCENT = _float_env("ALERT_THRESHOLD_PERCENT", 5.0)
 
 # --- Logging -------------------------------------------------------------
 LOG_FILE = os.getenv("LOG_FILE", "pipeline.log")
