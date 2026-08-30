@@ -1,7 +1,7 @@
 # Automated Crypto ETL Pipeline & Business Intelligence Dashboard
 
 [![Crypto ETL Pipeline](https://github.com/Vlad34745/crypto-etl-pipeline/actions/workflows/pipeline.yml/badge.svg)](https://github.com/Vlad34745/crypto-etl-pipeline/actions/workflows/pipeline.yml)
-![Coverage >= 70%](https://img.shields.io/badge/coverage-%E2%89%A570%25%20enforced%20in%20CI-brightgreen)
+[![codecov](https://codecov.io/gh/Vlad34745/crypto-etl-pipeline/branch/main/graph/badge.svg)](https://codecov.io/gh/Vlad34745/crypto-etl-pipeline)
 
 An automated data pipeline (ETL) that extracts real-time cryptocurrency
 market data via a REST API, stores it in SQLite, and compiles a styled
@@ -159,11 +159,9 @@ requirements-dev.txt       # + testing/linting dependencies
 2. **`test`** — installs dependencies (pip-cached) and runs the full test suite with coverage, failing the build if coverage drops below 70%.
 3. **`run-pipeline`** — on a schedule (every 6 hours) or manual trigger, runs the pipeline (Telegram secrets passed through if configured) and uploads the resulting database + workbook as a downloadable artifact (kept for 30 days). Neither is committed back to the repository — generated data files stay out of git history, consistent with `.gitignore`.
 
-**Note on the coverage badge:** the ≥70% figure reflects a threshold enforced
-in CI (the build fails below it), not a live per-commit percentage. For a
-dynamic percentage badge, connect the repo to [Codecov](https://about.codecov.io/)
-(free for public repos) and upload the `coverage.xml` that `pytest-cov`
-already generates.
+**Coverage badge:** powered by [Codecov](https://about.codecov.io/) (free for
+public repos) — see the setup steps below. Until it's connected, the badge
+shows "unknown"; `--cov-fail-under=70` in CI enforces the threshold either way.
 
 Dependabot (`.github/dependabot.yml`) opens a PR weekly for outdated pip
 packages and GitHub Actions versions.
