@@ -69,7 +69,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ALERT_THRESHOLD_PERCENT: "0.01"
         run: python crypto_automation.py --no-prompt
       - name: Upload updated database + workbook as artifact
         uses: actions/upload-artifact@v4
