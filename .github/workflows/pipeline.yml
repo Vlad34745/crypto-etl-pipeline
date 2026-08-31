@@ -71,7 +71,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python crypto_automation.py --no-prompt
       - name: Upload updated database + workbook as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: crypto-history-${{ github.run_id }}
           path: |
