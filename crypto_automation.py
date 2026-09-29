@@ -89,9 +89,17 @@ def fetch_crypto_data_with_retry(retries: int = None, delay: int = None):
         "price_change_percentage": "24h",
     }
 
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0 Safari/537.36"
+        )
+    }
+
     for attempt in range(retries):
         try:
-            response = requests.get(config.API_URL, params=params, timeout=30)
+            response = requests.get(config.API_URL, params=params, headers=headers, timeout=30)
             if response.status_code == 429:
                 logger.warning(
                     "Rate limit hit (429). Retrying in %ss... (Attempt %s/%s)",
