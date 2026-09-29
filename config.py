@@ -33,32 +33,31 @@ def _float_env(name: str, default: float) -> float:
 
 
 # --- Data source -----------------------------------------------------------
-# Comma-separated CoinGecko coin IDs (not tickers) — e.g. "bitcoin,ethereum".
-# See .env.example for a ready-to-copy list of common coin IDs, or use the
-# interactive prompt (just run `python crypto_automation.py`) and type
-# tickers like "btc eth sol" — they get resolved via TICKER_TO_COIN_ID below.
-COIN_IDS = os.getenv("COIN_IDS", "bitcoin")
-API_URL = os.getenv("API_URL", "https://api.coingecko.com/api/v3/coins/markets")
+# Comma-separated CoinPaprika coin IDs (e.g. "btc-bitcoin,eth-ethereum").
+# CoinPaprika's free tier needs no API key and isn't blocked on CI/datacenter
+# IPs the way CoinGecko/CryptoCompare's free tiers now are.
+COIN_IDS = os.getenv("COIN_IDS", "btc-bitcoin")
+API_URL = os.getenv("API_URL", "https://api.coinpaprika.com/v1/tickers")
 
-# Common ticker -> CoinGecko coin id, used to resolve what you type at the
+# Common ticker -> CoinPaprika coin id, used to resolve what you type at the
 # interactive coin-selection prompt. Not exhaustive — anything not listed
-# here is assumed to already be a valid CoinGecko id and passed through as-is.
+# here is assumed to already be a valid CoinPaprika id and passed through as-is.
 TICKER_TO_COIN_ID = {
-    "BTC": "bitcoin",
-    "ETH": "ethereum",
-    "SOL": "solana",
-    "NEAR": "near",
-    "TON": "the-open-network",
-    "ADA": "cardano",
-    "XRP": "ripple",
-    "DOGE": "dogecoin",
-    "DOT": "polkadot",
-    "AVAX": "avalanche-2",
-    "LINK": "chainlink",
-    "LTC": "litecoin",
-    "MATIC": "matic-network",
-    "POL": "matic-network",
-    "BNB": "binancecoin",
+    "BTC": "btc-bitcoin",
+    "ETH": "eth-ethereum",
+    "SOL": "sol-solana",
+    "NEAR": "near-near-protocol",
+    "TON": "ton-toncoin",
+    "ADA": "ada-cardano",
+    "XRP": "xrp-xrp",
+    "DOGE": "doge-dogecoin",
+    "DOT": "dot-polkadot",
+    "AVAX": "avax-avalanche",
+    "LINK": "link-chainlink",
+    "LTC": "ltc-litecoin",
+    "MATIC": "matic-polygon",
+    "POL": "pol-polygon-ecosystem-token",
+    "BNB": "bnb-binance-coin",
 }
 
 # --- Retry behaviour ---------------------------------------------------------

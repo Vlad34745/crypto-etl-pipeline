@@ -44,10 +44,10 @@ def setup_logging() -> None:
 
 def resolve_coin_ids(user_input: str) -> str:
     """Turn free-typed tickers/ids ("btc eth sol" or "btc,eth,sol") into a
-    CoinGecko-ready comma-separated id string ("bitcoin,ethereum,solana").
+    CoinPaprika-ready comma-separated id string ("btc-bitcoin,eth-ethereum,sol-solana").
 
     Tokens found in config.TICKER_TO_COIN_ID are translated; anything else
-    is assumed to already be a valid CoinGecko id and passed through
+    is assumed to already be a valid CoinPaprika id and passed through
     lowercased, as-is.
     """
     tokens = [t.strip() for t in user_input.replace(",", " ").split() if t.strip()]
@@ -75,19 +75,12 @@ def prompt_for_coins(default_coin_ids: str) -> str:
 # STEP 1: Automated Data Ingestion & API Integration
 # =============================================================================
 def fetch_crypto_data_with_retry(retries: int = None, delay: int = None):
-    """Call the CoinGecko markets endpoint, retrying on 429 / network errors."""
+    """Call the CoinPaprika ticker endpoint once per configured coin id,
+    retrying each on rate-limit / network errors. No API key required.
+    Returns a list of raw ticker objects, or None if any coin ultimately fails.
+    """
     retries = config.RETRIES if retries is None else retries
     delay = config.RETRY_DELAY_SECONDS if delay is None else delay
-
-    params = {
-        "vs_currency": "usd",
-        "ids": config.COIN_IDS,
-        "order": "market_cap_desc",
-        "per_page": 100,
-        "page": 1,
-        "sparkline": "false",
-        "price_change_percentage": "24h",
-    }
 
     headers = {
         "User-Agent": (
@@ -97,41 +90,53 @@ def fetch_crypto_data_with_retry(retries: int = None, delay: int = None):
         )
     }
 
-    for attempt in range(retries):
-        try:
-            response = requests.get(config.API_URL, params=params, headers=headers, timeout=30)
-            if response.status_code == 429:
-                logger.warning(
-                    "Rate limit hit (429). Retrying in %ss... (Attempt %s/%s)",
-                    delay, attempt + 1, retries,
-                )
-                time.sleep(delay)
-                continue
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error("Attempt %s failed: %s", attempt + 1, e)
-            if attempt < retries - 1:
-                time.sleep(delay)
-            else:
-                return None
-    return None
+    results = []
+    for coin_id in [c.strip() for c in config.COIN_IDS.split(",") if c.strip()]:
+        url = f"{config.API_URL}/{coin_id}"
+        coin_data = None
+        for attempt in range(retries):
+            try:
+                response = requests.get(url, params={"quotes": "USD"}, headers=headers, timeout=30)
+                if response.status_code == 429:
+                    logger.warning(
+                        "Rate limit hit (429) for %s. Retrying in %ss... (Attempt %s/%s)",
+                        coin_id, delay, attempt + 1, retries,
+                    )
+                    time.sleep(delay)
+                    continue
+                response.raise_for_status()
+                coin_data = response.json()
+                break
+            except requests.exceptions.RequestException as e:
+                logger.error("Attempt %s failed for %s: %s", attempt + 1, coin_id, e)
+                if attempt < retries - 1:
+                    time.sleep(delay)
+        if coin_data is None:
+            return None
+        results.append(coin_data)
+    return results
 
 
 def clean_raw_data(raw_json) -> pd.DataFrame:
-    """Turn the raw CoinGecko JSON payload into a tidy snapshot DataFrame."""
-    df_raw = pd.DataFrame(raw_json)
-    columns_to_keep = [
-        "name", "symbol", "current_price", "market_cap",
-        "total_volume", "price_change_percentage_24h",
-    ]
-    df_clean = df_raw[columns_to_keep].copy()
+    """Turn the list of raw CoinPaprika ticker objects into a tidy snapshot DataFrame."""
+    snapshot_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Convert API percentages (e.g. 0.48) into true decimal fractions (0.0048)
-    df_clean["price_change_percentage_24h"] = df_clean["price_change_percentage_24h"] / 100.0
-    df_clean["snapshot_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    df_clean["symbol"] = df_clean["symbol"].str.upper()
-    return df_clean
+    rows = []
+    for coin in raw_json:
+        usd_quote = coin.get("quotes", {}).get("USD", {})
+        rows.append({
+            "name": coin.get("name"),
+            "symbol": (coin.get("symbol") or "").upper(),
+            "current_price": usd_quote.get("price"),
+            "market_cap": usd_quote.get("market_cap"),
+            "total_volume": usd_quote.get("volume_24h"),
+            # CoinPaprika already reports this as a percentage (e.g. 0.48 = 0.48%);
+            # normalize to a true decimal fraction (0.0048) like the rest of the pipeline expects.
+            "price_change_percentage_24h": (usd_quote.get("percent_change_24h") or 0.0) / 100.0,
+            "snapshot_time": snapshot_time,
+        })
+
+    return pd.DataFrame(rows)
 
 
 def validate_data(df: pd.DataFrame, expected_coin_count: int = None) -> None:
