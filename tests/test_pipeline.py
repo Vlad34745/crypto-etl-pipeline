@@ -4,7 +4,7 @@ Unit tests for crypto_automation.py and db.py.
 Run with:
     pytest
 
-No real network calls are made — the CoinGecko API and Telegram are mocked.
+No real network calls are made — the CoinPaprika API and Telegram are mocked.
 """
 
 import os
@@ -21,25 +21,28 @@ import crypto_automation as pipeline  # noqa: E402
 import db  # noqa: E402
 
 
+def make_ticker(coin_id, name, symbol, price, market_cap, volume_24h, percent_change_24h):
+    """Build a CoinPaprika-shaped ticker object, as returned by
+    GET /v1/tickers/{coin_id}?quotes=USD
+    """
+    return {
+        "id": coin_id,
+        "name": name,
+        "symbol": symbol,
+        "quotes": {
+            "USD": {
+                "price": price,
+                "market_cap": market_cap,
+                "volume_24h": volume_24h,
+                "percent_change_24h": percent_change_24h,
+            }
+        },
+    }
+
+
 SAMPLE_RAW_JSON = [
-    {
-        "id": "bitcoin",
-        "name": "Bitcoin",
-        "symbol": "btc",
-        "current_price": 65000.0,
-        "market_cap": 1_280_000_000_000,
-        "total_volume": 30_000_000_000,
-        "price_change_percentage_24h": 2.5,
-    },
-    {
-        "id": "ethereum",
-        "name": "Ethereum",
-        "symbol": "eth",
-        "current_price": 3500.0,
-        "market_cap": 420_000_000_000,
-        "total_volume": 15_000_000_000,
-        "price_change_percentage_24h": -1.2,
-    },
+    make_ticker("btc-bitcoin", "Bitcoin", "BTC", 65000.0, 1_280_000_000_000, 30_000_000_000, 2.5),
+    make_ticker("eth-ethereum", "Ethereum", "ETH", 3500.0, 420_000_000_000, 15_000_000_000, -1.2),
 ]
 
 
@@ -53,18 +56,24 @@ def isolated_db(tmp_path, monkeypatch):
 
 
 # --- fetch_crypto_data_with_retry -------------------------------------------
-def test_fetch_success_returns_json():
-    mock_response = Mock(status_code=200)
-    mock_response.json.return_value = SAMPLE_RAW_JSON
-    mock_response.raise_for_status.return_value = None
+def test_fetch_success_returns_json(monkeypatch):
+    monkeypatch.setattr(config, "COIN_IDS", "btc-bitcoin,eth-ethereum")
 
-    with patch("crypto_automation.requests.get", return_value=mock_response):
+    responses = []
+    for ticker in SAMPLE_RAW_JSON:
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = ticker
+        mock_response.raise_for_status.return_value = None
+        responses.append(mock_response)
+
+    with patch("crypto_automation.requests.get", side_effect=responses):
         result = pipeline.fetch_crypto_data_with_retry(retries=3, delay=0)
 
     assert result == SAMPLE_RAW_JSON
 
 
-def test_fetch_retries_on_429_then_gives_up():
+def test_fetch_retries_on_429_then_gives_up(monkeypatch):
+    monkeypatch.setattr(config, "COIN_IDS", "btc-bitcoin")
     mock_response = Mock(status_code=429)
 
     with patch("crypto_automation.requests.get", return_value=mock_response) as mock_get, \
@@ -75,12 +84,28 @@ def test_fetch_retries_on_429_then_gives_up():
     assert mock_get.call_count == 3
 
 
-def test_fetch_returns_none_on_persistent_network_error():
+def test_fetch_returns_none_on_persistent_network_error(monkeypatch):
+    monkeypatch.setattr(config, "COIN_IDS", "btc-bitcoin")
+
     with patch("crypto_automation.requests.get", side_effect=pipeline.requests.exceptions.ConnectionError), \
          patch("crypto_automation.time.sleep", return_value=None):
         result = pipeline.fetch_crypto_data_with_retry(retries=2, delay=0)
 
     assert result is None
+
+
+def test_fetch_stops_after_first_coin_fails(monkeypatch):
+    """If an earlier coin ultimately fails, later coins aren't even requested."""
+    monkeypatch.setattr(config, "COIN_IDS", "btc-bitcoin,eth-ethereum")
+    mock_response = Mock(status_code=500)
+    mock_response.raise_for_status.side_effect = pipeline.requests.exceptions.HTTPError
+
+    with patch("crypto_automation.requests.get", return_value=mock_response) as mock_get, \
+         patch("crypto_automation.time.sleep", return_value=None):
+        result = pipeline.fetch_crypto_data_with_retry(retries=1, delay=0)
+
+    assert result is None
+    assert mock_get.call_count == 1
 
 
 # --- clean_raw_data ----------------------------------------------------------
@@ -229,20 +254,20 @@ def test_throttle_false_when_no_db_exists():
 
 # --- resolve_coin_ids: interactive ticker input --------------------------------
 def test_resolve_coin_ids_from_space_separated_tickers():
-    assert pipeline.resolve_coin_ids("btc eth sol") == "bitcoin,ethereum,solana"
+    assert pipeline.resolve_coin_ids("btc eth sol") == "btc-bitcoin,eth-ethereum,sol-solana"
 
 
 def test_resolve_coin_ids_is_case_insensitive():
-    assert pipeline.resolve_coin_ids("BTC Eth") == "bitcoin,ethereum"
+    assert pipeline.resolve_coin_ids("BTC Eth") == "btc-bitcoin,eth-ethereum"
 
 
 def test_resolve_coin_ids_accepts_commas_too():
-    assert pipeline.resolve_coin_ids("btc, eth, sol") == "bitcoin,ethereum,solana"
+    assert pipeline.resolve_coin_ids("btc, eth, sol") == "btc-bitcoin,eth-ethereum,sol-solana"
 
 
 def test_resolve_coin_ids_passes_through_unknown_tokens_as_ids():
-    # Not in TICKER_TO_COIN_ID -> assumed to already be a valid CoinGecko id
-    assert pipeline.resolve_coin_ids("btc dogwifhat") == "bitcoin,dogwifhat"
+    # Not in TICKER_TO_COIN_ID -> assumed to already be a valid CoinPaprika id
+    assert pipeline.resolve_coin_ids("btc dogwifhat") == "btc-bitcoin,dogwifhat"
 
 
 # --- check_price_alerts / send_telegram_alert: Telegram integration -------------
@@ -306,15 +331,19 @@ def test_build_excel_report_creates_dashboard_and_timeline_sheets(tmp_path):
 # --- main(): full pipeline orchestration ----------------------------------------
 def test_main_end_to_end_success(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "COIN_IDS", "btc-bitcoin,eth-ethereum")
     monkeypatch.setattr(config, "OUTPUT_FILE", str(tmp_path / "out.xlsx"))
     monkeypatch.setattr(config, "BACKUP_DIR", str(tmp_path / "backups"))
     monkeypatch.setattr(config, "LOG_FILE", str(tmp_path / "pipeline.log"))
 
-    mock_response = Mock(status_code=200)
-    mock_response.json.return_value = SAMPLE_RAW_JSON
-    mock_response.raise_for_status.return_value = None
+    responses = []
+    for ticker in SAMPLE_RAW_JSON:
+        mock_response = Mock(status_code=200)
+        mock_response.json.return_value = ticker
+        mock_response.raise_for_status.return_value = None
+        responses.append(mock_response)
 
-    with patch("crypto_automation.requests.get", return_value=mock_response):
+    with patch("crypto_automation.requests.get", side_effect=responses):
         exit_code = pipeline.main()
 
     assert exit_code == 0
@@ -325,6 +354,7 @@ def test_main_end_to_end_success(tmp_path, monkeypatch):
 
 def test_main_returns_1_on_fetch_failure(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "COIN_IDS", "btc-bitcoin")
     monkeypatch.setattr(config, "LOG_FILE", str(tmp_path / "pipeline.log"))
 
     with patch("crypto_automation.requests.get", side_effect=pipeline.requests.exceptions.ConnectionError), \
@@ -336,11 +366,12 @@ def test_main_returns_1_on_fetch_failure(tmp_path, monkeypatch):
 
 def test_main_returns_1_on_validation_failure(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "COIN_IDS", "btc-bitcoin")
     monkeypatch.setattr(config, "LOG_FILE", str(tmp_path / "pipeline.log"))
 
-    bad_json = [{**SAMPLE_RAW_JSON[0], "current_price": None}]
+    bad_ticker = make_ticker("btc-bitcoin", "Bitcoin", "BTC", None, 1_280_000_000_000, 30_000_000_000, 2.5)
     mock_response = Mock(status_code=200)
-    mock_response.json.return_value = bad_json
+    mock_response.json.return_value = bad_ticker
     mock_response.raise_for_status.return_value = None
 
     with patch("crypto_automation.requests.get", return_value=mock_response):
